@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>雷・花火 位置特定</title>
+    <title>雷・花火 位置特定（シングルボタン版）</title>
     <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
     <link
       href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
@@ -28,9 +28,6 @@
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
         z-index: 1;
         text-align: center;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
       }
       .btn {
         padding: 15px 20px;
@@ -55,10 +52,6 @@
         font-size: 14px;
         margin-top: 10px;
         color: #555;
-
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
       }
       #result {
         font-size: 16px;
@@ -66,24 +59,20 @@
         margin-top: 10px;
         color: #2c3e50;
       }
-      .info-title {
-        font-weight: bold;
-      }
     </style>
   </head>
   <body>
     <div id="map"></div>
 
     <div id="controls">
-      <button id="btn-start" class="btn">位置情報とコンパスをオンにする</button>
+      <button id="btn-start" class="btn">
+        📍 位置情報とコンパスをオンにする
+      </button>
       <button id="btn-action" class="btn">⚡ 光った！</button>
 
-      <span><span id="timer">--</span>秒</span>
       <div id="info-panel">
-        <span class="info-title">方角 </span>
-        <span id="heading-val" class="info-item">取得不可</span>
-        <span class="info-title">距離 </span>
-        <span class="info-item"><span id="dist-val">--</span>m</span>
+        方角: <span id="heading-val">取得不可</span> | 距離:
+        <span id="dist-val">--</span>m
       </div>
       <div id="result">まずは上のボタンを押してください</div>
     </div>
@@ -95,7 +84,6 @@
       let lockedHeading = null;
       let timeLight = null;
       let targetMarker = null;
-      let timerInterval;
 
       // アプリの状態管理（'waiting_light' -> 'waiting_sound' -> 'result'）
       let appState = "waiting_light";
@@ -105,7 +93,7 @@
       const headingVal = document.getElementById("heading-val");
       const distVal = document.getElementById("dist-val");
       const resultText = document.getElementById("result");
-      const timer = document.getElementById("timer");
+
       const map = new maplibregl.Map({
         container: "map",
         style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
@@ -174,18 +162,11 @@
           lockedHeading = currentHeading; // 方角が取得できていれば数値、できていなければnullが入る
 
           appState = "waiting_sound";
-          btnAction.textContent = "音がした！";
+          btnAction.textContent = "🔊 音がした！";
           btnAction.style.backgroundColor = "#3498db";
           btnAction.style.color = "#fff";
           resultText.textContent = "音が聞こえるまで待機中...";
-          timerInterval = setInterval(() => {
-            const timeSound = performance.now();
-            const time = Math.round((timeSound - timeLight) / 10) / 100;
-            timer.textContent = time;
-            console.log(time);
-          }, 0.01);
         } else if (appState === "waiting_sound") {
-          clearInterval(timerInterval);
           // 「音がした！」を押した時の処理
           const timeSound = performance.now();
           const distanceMeters = ((timeSound - timeLight) / 1000) * SOUND_SPEED;
@@ -201,7 +182,7 @@
           updateMap(distanceMeters, lockedHeading);
 
           appState = "result";
-          btnAction.textContent = "もう一度計測する";
+          btnAction.textContent = "🔄 もう一度計測する";
           btnAction.style.backgroundColor = "#95a5a6";
           btnAction.style.color = "#fff";
         } else if (appState === "result") {
@@ -216,7 +197,7 @@
         timeLight = null;
         lockedHeading = null;
         distVal.textContent = "--";
-        btnAction.textContent = "光った！";
+        btnAction.textContent = "⚡ 光った！";
         btnAction.style.backgroundColor = "#f1c40f";
         btnAction.style.color = "#333";
         resultText.textContent = "光ったらボタンを押してください！";
@@ -277,13 +258,16 @@
 
           // ピンの描画
           if (targetMarker) targetMarker.remove();
+          const el = document.createElement("div");
+          el.innerHTML = "💥";
+          el.style.fontSize = "30px";
           targetMarker = new maplibregl.Marker(el)
             .setLngLat(targetPoint.geometry.coordinates)
             .addTo(map);
         } else {
           // 方角がない場合は、過去の線とピンを消去
           if (map.getSource("sight-line")) {
-            updateSource("sight-line", turf.featureCollection([]));
+            updateSource("sight-line", turf.featureCollection([])); // 空のデータを入れて非表示化
           }
           if (targetMarker) {
             targetMarker.remove();
