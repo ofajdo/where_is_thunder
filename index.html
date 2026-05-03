@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>雷・花火 位置特定（シングルボタン版）</title>
+    <title>雷・花火 位置特定</title>
     <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
     <link
       href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
@@ -28,6 +28,9 @@
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
         z-index: 1;
         text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
       .btn {
         padding: 15px 20px;
@@ -47,11 +50,14 @@
       }
       #btn-action {
         display: none;
-      } /* 初期状態は非表示 */
+      }
       #info-panel {
         font-size: 14px;
         margin-top: 10px;
         color: #555;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
       }
       #result {
         font-size: 16px;
@@ -59,20 +65,30 @@
         margin-top: 10px;
         color: #2c3e50;
       }
+      .info-title {
+        font-weight: bold;
+      }
+      /* タイマーの文字を少し大きく */
+      #timer-container {
+        font-size: 20px;
+        font-weight: bold;
+        margin-top: 5px;
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
 
     <div id="controls">
-      <button id="btn-start" class="btn">
-        📍 位置情報とコンパスをオンにする
-      </button>
+      <button id="btn-start" class="btn">位置情報とコンパスをオンにする</button>
       <button id="btn-action" class="btn">⚡ 光った！</button>
 
+      <div id="timer-container"><span id="timer">0.00</span> 秒</div>
       <div id="info-panel">
-        方角: <span id="heading-val">取得不可</span> | 距離:
-        <span id="dist-val">--</span>m
+        <span class="info-title">方角 </span>
+        <span id="heading-val" class="info-item">取得不可</span>
+        <span class="info-title">距離 </span>
+        <span class="info-item"><span id="dist-val">--</span>m</span>
       </div>
       <div id="result">まずは上のボタンを押してください</div>
     </div>
@@ -80,12 +96,13 @@
     <script>
       const SOUND_SPEED = 340;
       let userLocation = null;
-      let currentHeading = null; // 初期値はnull（取得できない状態）
+      let currentHeading = null;
       let lockedHeading = null;
       let timeLight = null;
       let targetMarker = null;
+      let timerInterval;
+      let isTrackingHeading = true; // 地図のアニメーション中はコンパスの同期を一時停止するフラグ
 
-      // アプリの状態管理（'waiting_light' -> 'waiting_sound' -> 'result'）
       let appState = "waiting_light";
 
       const btnStart = document.getElementById("btn-start");
@@ -93,17 +110,18 @@
       const headingVal = document.getElementById("heading-val");
       const distVal = document.getElementById("dist-val");
       const resultText = document.getElementById("result");
+      const timer = document.getElementById("timer");
 
       const map = new maplibregl.Map({
         container: "map",
         style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
         center: [139.767, 35.681],
         zoom: 12,
+        pitch: 0, // 見下ろす角度（必要であれば数値を上げて3D風にできます）
       });
 
-      // 1. 初期設定（位置情報とコンパスの取得）
+      // 1. 初期設定
       btnStart.addEventListener("click", async () => {
-        // コンパスの取得
         if (
           typeof DeviceOrientationEvent !== "undefined" &&
           typeof DeviceOrientationEvent.requestPermission === "function"
@@ -122,7 +140,6 @@
           );
         }
 
-        // 位置情報の取得
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition((position) => {
             userLocation = [
@@ -132,9 +149,14 @@
             new maplibregl.Marker({ color: "#3498db" })
               .setLngLat(userLocation)
               .addTo(map);
-            map.flyTo({ center: userLocation, zoom: 14 });
 
-            // UIの切り替え
+            // アニメーション中はコンパスの同期を止める
+            isTrackingHeading = false;
+            map.flyTo({ center: userLocation, zoom: 14 });
+            map.once("moveend", () => {
+              isTrackingHeading = true;
+            });
+
             btnStart.style.display = "none";
             btnAction.style.display = "inline-block";
             resetActionBtnToLight();
@@ -144,30 +166,43 @@
         }
       });
 
+      // 方角の取得と地図の回転
       function handleOrientation(event) {
         let heading =
           event.webkitCompassHeading ||
           (event.absolute ? 360 - event.alpha : null);
+
         if (heading !== null) {
           currentHeading = heading;
           headingVal.textContent = Math.round(heading) + "°";
+
+          // ズーム移動アニメーション中でなければ、地図を端末の向きに合わせて回転
+          if (isTrackingHeading) {
+            map.setBearing(heading);
+          }
         }
       }
 
-      // 2. メインボタンのクリック処理（状態に応じて分岐）
+      // 2. メインボタンのクリック処理
       btnAction.addEventListener("click", () => {
         if (appState === "waiting_light") {
-          // 「光った！」を押した時の処理
           timeLight = performance.now();
-          lockedHeading = currentHeading; // 方角が取得できていれば数値、できていなければnullが入る
+          lockedHeading = currentHeading;
 
           appState = "waiting_sound";
-          btnAction.textContent = "🔊 音がした！";
+          btnAction.textContent = "音がした！";
           btnAction.style.backgroundColor = "#3498db";
           btnAction.style.color = "#fff";
           resultText.textContent = "音が聞こえるまで待機中...";
+
+          // タイマーの更新（10ミリ秒ごとに実行）
+          timerInterval = setInterval(() => {
+            const timeSound = performance.now();
+            const time = (timeSound - timeLight) / 1000;
+            timer.textContent = time.toFixed(2); // 小数点第2位まで表示
+          }, 10);
         } else if (appState === "waiting_sound") {
-          // 「音がした！」を押した時の処理
+          clearInterval(timerInterval);
           const timeSound = performance.now();
           const distanceMeters = ((timeSound - timeLight) / 1000) * SOUND_SPEED;
           distVal.textContent = Math.round(distanceMeters);
@@ -182,32 +217,44 @@
           updateMap(distanceMeters, lockedHeading);
 
           appState = "result";
-          btnAction.textContent = "🔄 もう一度計測する";
+          btnAction.textContent = "もう一度計測する";
           btnAction.style.backgroundColor = "#95a5a6";
           btnAction.style.color = "#fff";
         } else if (appState === "result") {
-          // 「もう一度計測する」を押した時の処理
           resetActionBtnToLight();
         }
       });
 
-      // ボタンを「光った」状態にリセットする関数
+      // リセット処理
       function resetActionBtnToLight() {
         appState = "waiting_light";
         timeLight = null;
         lockedHeading = null;
         distVal.textContent = "--";
+        timer.textContent = "0.00";
         btnAction.textContent = "⚡ 光った！";
         btnAction.style.backgroundColor = "#f1c40f";
         btnAction.style.color = "#333";
         resultText.textContent = "光ったらボタンを押してください！";
+
+        // 過去の線とピンを消去
+        if (map.getSource("sight-line")) {
+          updateSource("sight-line", turf.featureCollection([]));
+        }
+        if (targetMarker) {
+          targetMarker.remove();
+          targetMarker = null;
+        }
+        if (map.getSource("flash-radius")) {
+          updateSource("flash-radius", turf.featureCollection([]));
+        }
       }
 
       // 3. マップの描画処理
       function updateMap(distanceMeters, headingDegrees) {
         const distanceKm = distanceMeters / 1000;
 
-        // 【常に描画】円（距離の範囲）
+        // 円（距離の範囲）
         const circle = turf.circle(userLocation, distanceKm, {
           steps: 64,
           units: "kilometers",
@@ -232,7 +279,7 @@
           });
         }
 
-        // 【方角がある場合のみ描画】線とピン
+        // 線とピン
         if (headingDegrees !== null) {
           const targetPoint = turf.destination(
             userLocation,
@@ -241,7 +288,6 @@
             { units: "kilometers" },
           );
 
-          // 線の描画
           const line = turf.lineString([
             userLocation,
             targetPoint.geometry.coordinates,
@@ -256,7 +302,7 @@
             });
           }
 
-          // ピンの描画
+          // 【修正箇所】マーカー用の要素(el)を定義してピンを描画
           if (targetMarker) targetMarker.remove();
           const el = document.createElement("div");
           el.innerHTML = "💥";
@@ -264,20 +310,22 @@
           targetMarker = new maplibregl.Marker(el)
             .setLngLat(targetPoint.geometry.coordinates)
             .addTo(map);
-        } else {
-          // 方角がない場合は、過去の線とピンを消去
-          if (map.getSource("sight-line")) {
-            updateSource("sight-line", turf.featureCollection([])); // 空のデータを入れて非表示化
-          }
-          if (targetMarker) {
-            targetMarker.remove();
-            targetMarker = null;
-          }
         }
 
-        // 円が画面に収まるようにズーム調整
+        // アニメーション中はコンパスの同期を止める
+        isTrackingHeading = false;
         const bbox = turf.bbox(circle);
-        map.fitBounds(bbox, { padding: 50 });
+
+        // bearingを指定して、現在の向きを維持したままズームする
+        map.fitBounds(bbox, {
+          padding: 50,
+          bearing: currentHeading || 0,
+        });
+
+        // ズーム完了後にコンパス同期を再開
+        map.once("moveend", () => {
+          isTrackingHeading = true;
+        });
       }
 
       function updateSource(id, data) {
